@@ -51,8 +51,16 @@ start_time = st.sidebar.time_input("Start Time", value=datetime.strptime("00:00"
 # Combine date and time
 start_datetime = datetime.combine(start_date, start_time)
 
-# Max shift parameter (internal use only)
-max_shift = 8761
+# Max shift parameter (user-configurable)
+st.sidebar.header("🔀 Shift Configuration")
+max_shift = st.sidebar.number_input(
+    "Maximum Shift (hours):",
+    min_value=1,
+    max_value=8761,
+    value=24,
+    step=1,
+    help="Maximum number of hours the model data is allowed to shift when searching for the best alignment with the survey data. Default is 24 hours."
+)
 
 def parse_input_data(input_text):
     """Parse input text into DataFrame"""
@@ -126,7 +134,7 @@ if model_input and survey_input:
                 model_data['water_elevation'] = model_data['water_elevation'] - model_mean
                 survey_data['water_elevation'] = survey_data['water_elevation'] - survey_mean
                 
-                st.info(f"✓ Zero-mean conversion applied | Model mean: {model_mean:.4f} m | Survey mean: {survey_mean:.4f} m")
+                st.info(f"✓ Zero-mean conversion applied | Model mean: {model_mean:.4f} | Survey mean: {survey_mean:.4f}")
             
             # Display data info
             col1, col2 = st.columns(2)
@@ -181,12 +189,14 @@ if model_input and survey_input:
                     # Display results
                     st.success("✅ Analysis Complete!")
                     
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Best Shift", f"{best_shift} timesteps")
+                        st.metric("Best Shift", f"{best_shift} hours")
                     with col2:
-                        st.metric("RMSE", f"{final_rmse:.4f} m")
+                        st.metric("Max Shift Allowed", f"{max_shift} hours")
                     with col3:
+                        st.metric("RMSE", f"{final_rmse:.4f}")
+                    with col4:
                         st.metric("RMSE (%)", f"{rmse_percent:.2f}%")
                     
                     if apply_zero_mean:
@@ -202,7 +212,7 @@ if model_input and survey_input:
                     ax.plot(output_df['datetime'], output_df['model_data'], 
                            label='Model Data', linewidth=2, color='#A23B72', alpha=0.8, linestyle='--')
                     
-                    ylabel = 'Water Elevation - Zero-Meaned (m)' if apply_zero_mean else 'Water Elevation (m)'
+                    ylabel = 'Water Elevation - Zero-Meaned' if apply_zero_mean else 'Water Elevation'
                     ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
                     ax.set_xlabel('Date Time', fontsize=12, fontweight='bold')
                     ax.set_title('Comparison between Survey Data and Model Data', 
@@ -261,11 +271,12 @@ else:
     2. **Paste Survey Data**: Paste survey water elevation values (one value per line)
     3. **Datum Conversion**: Check "Apply zero-mean conversion" to normalize both datasets (recommended when tide datums don't match)
     4. **Set Start Time**: Specify the start date and time for your survey data
-    5. **Run Analysis**: Click the "Run Analysis" button to find the best alignment
+    5. **Set Maximum Shift**: Define the maximum number of hours the model data can shift during alignment search (default: 24 hours)
+    6. **Run Analysis**: Click the "Run Analysis" button to find the best alignment
     
     The application will:
     - Convert both datasets to zero-mean (if selected) to handle different tide datums
-    - Find the optimal time shift between model and survey data
+    - Find the optimal time shift between model and survey data (within the max shift limit)
     - Calculate RMSE and RMSE(%) on the normalized data
     - Generate comparison plots (with option to view original datum)
     - Allow you to download the aligned results
@@ -276,4 +287,5 @@ else:
     - Each value should be on a new line
     - The analysis assumes hourly data frequency
     - Use zero-mean conversion when your model and survey data use different vertical datums
+    - A smaller max shift keeps the alignment physically realistic and speeds up analysis
     """)
