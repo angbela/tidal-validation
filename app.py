@@ -5,8 +5,11 @@ import numpy as np
 from sklearn.metrics import mean_squared_error
 from math import sqrt
 from datetime import datetime
-import io
 
+
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
 
 st.set_page_config(
     page_title="Water Elevation Analysis",
@@ -14,20 +17,22 @@ st.set_page_config(
 )
 
 st.title("🌊 Water Elevation Data Analysis")
+
 st.markdown(
-    "Paste timestamped model and survey data to find the best alignment and calculate RMSE."
+    "Paste timestamped model and survey data to find the best "
+    "time alignment and calculate RMSE."
 )
 
 
 # ============================================================
-# SIDEBAR INPUTS
+# SIDEBAR - DATA INPUT
 # ============================================================
 
 st.sidebar.header("📊 Data Input")
 
 
 # ------------------------------------------------------------
-# Model Data
+# MODEL DATA
 # ------------------------------------------------------------
 
 st.sidebar.subheader("Model Data")
@@ -40,15 +45,19 @@ model_input = st.sidebar.text_area(
         "2/12/1900 00:02\t-0.346125\n"
         "2/12/1900 00:04\t-0.347500\n"
         "2/12/1900 00:06\t-0.350125\n"
+        "2/12/1900 00:08\t-0.351250\n"
         "..."
     ),
     key="model",
-    help="Format: Date Time <TAB or space> Water Elevation"
+    help=(
+        "Format: Date Time followed by water elevation. "
+        "Example: 2/12/1900 00:00    -0.344375"
+    )
 )
 
 
 # ------------------------------------------------------------
-# Survey Data
+# SURVEY DATA
 # ------------------------------------------------------------
 
 st.sidebar.subheader("Survey Data")
@@ -65,7 +74,10 @@ survey_input = st.sidebar.text_area(
         "2/12/1900 01:15\t-0.352267"
     ),
     key="survey",
-    help="Format: Date Time <TAB or space> Water Elevation"
+    help=(
+        "Format: Date Time followed by water elevation. "
+        "Example: 2/12/1900 00:15    -0.349063"
+    )
 )
 
 
@@ -79,8 +91,8 @@ apply_zero_mean = st.sidebar.checkbox(
     "Apply zero-mean conversion",
     value=True,
     help=(
-        "Convert both datasets to zero-mean by removing their "
-        "respective mean values before calculating RMSE."
+        "Convert both datasets to zero-mean by removing "
+        "their respective mean values before analysis."
     )
 )
 
@@ -98,11 +110,10 @@ max_shift = st.sidebar.number_input(
     value=24,
     step=1,
     help=(
-        "Maximum time shift allowed when searching for the best "
-        "alignment between model and survey data."
+        "Maximum time shift allowed when searching for the "
+        "best alignment between model and survey."
     )
 )
-
 
 shift_step_minutes = st.sidebar.number_input(
     "Shift Search Step (minutes):",
@@ -111,29 +122,34 @@ shift_step_minutes = st.sidebar.number_input(
     value=2,
     step=1,
     help=(
-        "Time interval used when searching for the best shift. "
+        "Time increment used during the alignment search. "
         "For a 2-minute model, 2 minutes is recommended."
     )
 )
 
 
 # ============================================================
-# DATA PARSING
+# PARSE INPUT DATA
 # ============================================================
 
 def parse_input_data(input_text, dataset_name):
     """
-    Parse timestamp + water elevation input.
+    Parse timestamp + water elevation data.
 
-    Accepted examples:
+    Supported formats:
 
-    2/12/1900 00:00    -0.344375
-    2/12/1900 00:15    -0.349063
+        2/12/1900 00:00    -0.344375
 
-    Delimiters:
-    - tab
-    - multiple spaces
-    - comma
+    or:
+
+        2/12/1900 00:00\t-0.344375
+
+    or:
+
+        2/12/1900 00:00,-0.344375
+
+    The final numeric value on each line is interpreted
+    as water elevation.
     """
 
     if not input_text or not input_text.strip():
@@ -152,42 +168,41 @@ def parse_input_data(input_text, dataset_name):
 
         try:
 
-            # ------------------------------------------------
-            # First try TAB separation
-            # ------------------------------------------------
+            # ==================================================
+            # TAB-SEPARATED
+            # ==================================================
 
             if "\t" in line:
 
                 parts = line.split("\t")
 
                 if len(parts) < 2:
-                    raise ValueError("Missing value")
+                    raise ValueError(
+                        "Missing water elevation value."
+                    )
 
                 timestamp_text = parts[0].strip()
                 value_text = parts[-1].strip()
 
-            # ------------------------------------------------
-            # Try comma separation
-            # ------------------------------------------------
+            # ==================================================
+            # COMMA-SEPARATED
+            # ==================================================
 
             elif "," in line:
 
                 parts = line.rsplit(",", 1)
 
                 if len(parts) != 2:
-                    raise ValueError("Invalid comma-separated format")
+                    raise ValueError(
+                        "Invalid comma-separated format."
+                    )
 
                 timestamp_text = parts[0].strip()
                 value_text = parts[1].strip()
 
-            # ------------------------------------------------
-            # Otherwise assume last whitespace-separated token
-            # is the water elevation.
-            #
-            # This allows:
-            #
-            # 2/12/1900 00:15 -0.349063
-            # ------------------------------------------------
+            # ==================================================
+            # SPACE-SEPARATED
+            # ==================================================
 
             else:
 
@@ -195,25 +210,25 @@ def parse_input_data(input_text, dataset_name):
 
                 if len(parts) != 2:
                     raise ValueError(
-                        "Expected timestamp followed by water elevation"
+                        "Expected timestamp followed by "
+                        "water elevation."
                     )
 
                 timestamp_text = parts[0].strip()
                 value_text = parts[1].strip()
 
-            # ------------------------------------------------
-            # Parse timestamp
-            # ------------------------------------------------
+            # ==================================================
+            # PARSE DATETIME
+            # ==================================================
 
             timestamp = pd.to_datetime(
                 timestamp_text,
-                dayfirst=False,
                 errors="raise"
             )
 
-            # ------------------------------------------------
-            # Parse elevation
-            # ------------------------------------------------
+            # ==================================================
+            # PARSE VALUE
+            # ==================================================
 
             value = float(value_text)
 
@@ -227,42 +242,61 @@ def parse_input_data(input_text, dataset_name):
         except Exception as e:
 
             st.error(
-                f"❌ Error parsing {dataset_name}, line {line_number}: "
-                f"`{line}`\n\n{str(e)}"
+                f"❌ Error parsing {dataset_name}, "
+                f"line {line_number}:\n\n"
+                f"`{line}`\n\n"
+                f"{str(e)}"
             )
 
             return None
 
     if len(records) == 0:
-        st.error(f"❌ No valid records found in {dataset_name}.")
-        return None
-
-    df = pd.DataFrame(records)
-
-    # --------------------------------------------------------
-    # Sort by datetime
-    # --------------------------------------------------------
-
-    df = df.sort_values("datetime").reset_index(drop=True)
-
-    # --------------------------------------------------------
-    # Check duplicate timestamps
-    # --------------------------------------------------------
-
-    duplicate_count = df["datetime"].duplicated().sum()
-
-    if duplicate_count > 0:
 
         st.error(
-            f"❌ {dataset_name} contains {duplicate_count} "
-            f"duplicate timestamp(s). Each timestamp must be unique."
+            f"❌ No valid records found in {dataset_name}."
         )
 
         return None
 
-    # --------------------------------------------------------
-    # Create timestep index
-    # --------------------------------------------------------
+    # ========================================================
+    # CREATE DATAFRAME
+    # ========================================================
+
+    df = pd.DataFrame(records)
+
+    # ========================================================
+    # SORT BY TIME
+    # ========================================================
+
+    df = (
+        df
+        .sort_values("datetime")
+        .reset_index(drop=True)
+    )
+
+    # ========================================================
+    # CHECK DUPLICATE TIMESTAMPS
+    # ========================================================
+
+    duplicate_count = (
+        df["datetime"]
+        .duplicated()
+        .sum()
+    )
+
+    if duplicate_count > 0:
+
+        st.error(
+            f"❌ {dataset_name} contains "
+            f"{duplicate_count} duplicate timestamp(s).\n\n"
+            "Each timestamp must be unique."
+        )
+
+        return None
+
+    # ========================================================
+    # TIMESTEP INDEX
+    # ========================================================
 
     df["timestep"] = range(len(df))
 
@@ -270,10 +304,13 @@ def parse_input_data(input_text, dataset_name):
 
 
 # ============================================================
-# DATA INTERVAL INFORMATION
+# CALCULATE DATA INTERVAL
 # ============================================================
 
 def calculate_interval_minutes(df):
+    """
+    Calculate typical timestep interval in minutes.
+    """
 
     if df is None or len(df) < 2:
         return None
@@ -297,54 +334,66 @@ def calculate_interval_minutes(df):
 
 
 # ============================================================
-# MODEL INTERPOLATION
+# INTERPOLATION FUNCTION
 # ============================================================
 
-def interpolate_model_at_times(
-    model_data,
+def interpolate_values_at_times(
+    source_data,
     target_times
 ):
     """
-    Interpolate model values at target timestamps.
+    Interpolate source_data onto target timestamps.
 
     IMPORTANT:
     No extrapolation is allowed.
 
-    Every target timestamp must be within the model
-    time range.
-
-    Returns:
-        interpolated values
-        OR None if any target timestamp is outside
-        the model time range.
+    If even one target timestamp lies outside the
+    source data time range, None is returned.
     """
 
-    model_times = model_data["datetime"].astype("int64").values
-    model_values = model_data["water_elevation"].values
+    if source_data is None or len(source_data) < 2:
+        return None
 
-    target_times_ns = pd.Series(target_times).astype("int64").values
+    source_times = (
+        source_data["datetime"]
+        .astype("int64")
+        .values
+    )
 
-    # --------------------------------------------------------
-    # Constraint:
-    # ALL survey timestamps must have a corresponding
-    # model value within the model time range.
-    # --------------------------------------------------------
+    source_values = (
+        source_data["water_elevation"]
+        .values
+    )
+
+    target_times = pd.Series(
+        target_times
+    )
+
+    target_times_ns = (
+        target_times
+        .astype("int64")
+        .values
+    )
+
+    # ========================================================
+    # CHECK SOURCE RANGE
+    # ========================================================
 
     if (
-        target_times_ns.min() < model_times.min()
+        target_times_ns.min() < source_times.min()
         or
-        target_times_ns.max() > model_times.max()
+        target_times_ns.max() > source_times.max()
     ):
         return None
 
-    # --------------------------------------------------------
-    # Linear interpolation
-    # --------------------------------------------------------
+    # ========================================================
+    # LINEAR INTERPOLATION
+    # ========================================================
 
     interpolated_values = np.interp(
         target_times_ns,
-        model_times,
-        model_values
+        source_times,
+        source_values
     )
 
     return interpolated_values
@@ -361,26 +410,123 @@ def find_best_shift(
     shift_step_minutes
 ):
     """
-    Find the time shift producing the minimum RMSE.
+    Find best time alignment.
 
-    Positive shift:
-        model timestamps are shifted forward.
+    The dataset with the COARSER sampling interval is used
+    as the reference/comparison timeline.
 
-    Negative shift:
-        model timestamps are shifted backward.
+    Example:
 
-    For each candidate shift, model values are interpolated
-    at the survey timestamps.
+        Model  = 2 minutes
+        Survey = 15 minutes
 
-    A shift is considered valid ONLY if every survey timestamp
-    can be matched/interpolated from the model data.
+    Survey becomes the reference timeline.
+
+    The model timestamps are shifted and the model values
+    are interpolated onto the survey timestamps.
+
+    If the model is coarser than the survey, the opposite
+    happens: survey is interpolated onto model timestamps.
+
+    No extrapolation is allowed.
+
+    Every reference timestamp must have a corresponding
+    value in the other dataset.
     """
 
-    max_shift_minutes = int(max_shift_hours * 60)
+    # ========================================================
+    # CALCULATE INTERVALS
+    # ========================================================
 
-    # --------------------------------------------------------
-    # Create candidate shifts
-    # --------------------------------------------------------
+    model_interval = calculate_interval_minutes(
+        model_data
+    )
+
+    survey_interval = calculate_interval_minutes(
+        survey_data
+    )
+
+    if model_interval is None:
+
+        st.error(
+            "❌ Model data requires at least "
+            "2 timestamps."
+        )
+
+        return (
+            None,
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+
+    if survey_interval is None:
+
+        st.error(
+            "❌ Survey data requires at least "
+            "2 timestamps."
+        )
+
+        return (
+            None,
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+
+    # ========================================================
+    # DETERMINE COARSER DATASET
+    # ========================================================
+
+    if (
+        model_interval["median"]
+        >
+        survey_interval["median"]
+    ):
+
+        reference = "model"
+
+        reference_data = model_data
+
+        reference_interval = (
+            model_interval["median"]
+        )
+
+        comparison_name = "Model"
+
+    else:
+
+        reference = "survey"
+
+        reference_data = survey_data
+
+        reference_interval = (
+            survey_interval["median"]
+        )
+
+        comparison_name = "Survey"
+
+    # ========================================================
+    # SHOW REFERENCE INFORMATION
+    # ========================================================
+
+    st.info(
+        f"ℹ️ Comparison timeline: **{comparison_name}** "
+        f"(typical interval: "
+        f"**{reference_interval:.2f} minutes**)."
+    )
+
+    # ========================================================
+    # SHIFT RANGE
+    # ========================================================
+
+    max_shift_minutes = int(
+        max_shift_hours * 60
+    )
 
     shift_values = np.arange(
         -max_shift_minutes,
@@ -388,27 +534,48 @@ def find_best_shift(
         shift_step_minutes
     )
 
+    # ========================================================
+    # RESULT STORAGE
+    # ========================================================
+
     best_rmse = float("inf")
+
     best_shift_minutes = None
+
+    best_reference_times = None
+
     best_model_values = None
 
+    best_survey_values = None
+
+    best_model_datetimes = None
+
+    # ========================================================
+    # PROGRESS
+    # ========================================================
+
     progress_bar = st.progress(0)
+
     status_text = st.empty()
 
     valid_shift_count = 0
 
-    # --------------------------------------------------------
-    # Search shifts
-    # --------------------------------------------------------
+    # ========================================================
+    # SEARCH ALL SHIFTS
+    # ========================================================
 
-    for i, shift_minutes in enumerate(shift_values):
+    for i, shift_minutes in enumerate(
+        shift_values
+    ):
 
-        # ----------------------------------------------------
-        # Shift MODEL timestamps
-        # ----------------------------------------------------
+        # ====================================================
+        # SHIFT MODEL TIME
+        # ====================================================
 
-        shifted_model_times = (
-            model_data["datetime"]
+        shifted_model = model_data.copy()
+
+        shifted_model["datetime"] = (
+            shifted_model["datetime"]
             +
             pd.to_timedelta(
                 shift_minutes,
@@ -416,91 +583,211 @@ def find_best_shift(
             )
         )
 
-        shifted_model = model_data.copy()
+        # ====================================================
+        # MODEL IS COARSER
+        # ====================================================
 
-        shifted_model["datetime"] = shifted_model_times
+        if reference == "model":
 
-        # ----------------------------------------------------
-        # Interpolate model at survey timestamps
-        # ----------------------------------------------------
+            comparison_times = (
+                reference_data["datetime"]
+            )
 
-        interpolated_model = interpolate_model_at_times(
-            shifted_model,
-            survey_data["datetime"]
-        )
+            model_values = (
+                reference_data[
+                    "water_elevation"
+                ]
+                .values
+            )
 
-        # ----------------------------------------------------
-        # If any survey point cannot be matched,
-        # this shift is invalid.
-        # ----------------------------------------------------
+            survey_values = (
+                interpolate_values_at_times(
+                    survey_data,
+                    comparison_times
+                )
+            )
 
-        if interpolated_model is None:
-            continue
+            if survey_values is None:
+                continue
 
-        # ----------------------------------------------------
-        # Calculate RMSE
-        # ----------------------------------------------------
+            model_datetimes = (
+                comparison_times
+            )
+
+        # ====================================================
+        # SURVEY IS COARSER
+        # ====================================================
+
+        else:
+
+            comparison_times = (
+                reference_data["datetime"]
+            )
+
+            survey_values = (
+                reference_data[
+                    "water_elevation"
+                ]
+                .values
+            )
+
+            model_values = (
+                interpolate_values_at_times(
+                    shifted_model,
+                    comparison_times
+                )
+            )
+
+            if model_values is None:
+                continue
+
+            # ------------------------------------------------
+            # Find the actual model timestamps surrounding
+            # each survey timestamp.
+            #
+            # For output purposes we retain the original
+            # survey timeline and calculate the corresponding
+            # shifted model time.
+            # ------------------------------------------------
+
+            model_datetimes = (
+                comparison_times
+                -
+                pd.to_timedelta(
+                    shift_minutes,
+                    unit="min"
+                )
+            )
+
+        # ====================================================
+        # RMSE
+        # ====================================================
 
         rmse = sqrt(
             mean_squared_error(
-                interpolated_model,
-                survey_data["water_elevation"].values
+                model_values,
+                survey_values
             )
         )
 
         valid_shift_count += 1
 
+        # ====================================================
+        # STORE BEST RESULT
+        # ====================================================
+
         if rmse < best_rmse:
 
             best_rmse = rmse
-            best_shift_minutes = shift_minutes
-            best_model_values = interpolated_model.copy()
 
-        # ----------------------------------------------------
-        # Progress
-        # ----------------------------------------------------
+            best_shift_minutes = (
+                shift_minutes
+            )
 
-        if i % 10 == 0 or i == len(shift_values) - 1:
+            best_reference_times = (
+                comparison_times.copy()
+            )
 
-            progress = (i + 1) / len(shift_values)
+            best_model_values = (
+                np.asarray(
+                    model_values
+                ).copy()
+            )
 
-            progress_bar.progress(progress)
+            best_survey_values = (
+                np.asarray(
+                    survey_values
+                ).copy()
+            )
+
+            best_model_datetimes = (
+                pd.Series(
+                    model_datetimes
+                ).reset_index(drop=True)
+            )
+
+        # ====================================================
+        # PROGRESS UPDATE
+        # ====================================================
+
+        if (
+            i % 10 == 0
+            or
+            i == len(shift_values) - 1
+        ):
+
+            progress = (
+                (i + 1)
+                /
+                len(shift_values)
+            )
+
+            progress_bar.progress(
+                progress
+            )
 
             status_text.text(
                 f"Analyzing shift: "
-                f"{shift_minutes:+d} min | "
-                f"Valid shifts: {valid_shift_count}"
+                f"{shift_minutes:+d} min "
+                f"({shift_minutes / 60:+.2f} hr) | "
+                f"Valid shifts: "
+                f"{valid_shift_count}"
             )
+
+    # ========================================================
+    # COMPLETE
+    # ========================================================
 
     progress_bar.progress(1.0)
 
+    # ========================================================
+    # NO VALID SHIFT
+    # ========================================================
+
     if best_shift_minutes is None:
 
-        status_text.text("Analysis failed.")
+        status_text.text(
+            "No valid alignment found."
+        )
 
-        return None, None, None
+        return (
+            None,
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+
+    # ========================================================
+    # SUCCESS
+    # ========================================================
 
     status_text.text(
         f"Analysis complete! "
-        f"Best shift: {best_shift_minutes:+d} minutes"
+        f"Best shift: "
+        f"{best_shift_minutes:+d} minutes"
     )
 
     return (
         best_rmse,
         best_shift_minutes,
-        best_model_values
+        best_reference_times,
+        best_model_values,
+        best_survey_values,
+        best_model_datetimes
     )
 
 
 # ============================================================
-# MAIN ANALYSIS
+# MAIN APPLICATION
 # ============================================================
 
 if model_input and survey_input:
 
-    # --------------------------------------------------------
-    # Parse data
-    # --------------------------------------------------------
+    # ========================================================
+    # PARSE INPUT
+    # ========================================================
 
     model_data = parse_input_data(
         model_input,
@@ -512,74 +799,253 @@ if model_input and survey_input:
         "Survey Data"
     )
 
-    if model_data is not None and survey_data is not None:
+    if (
+        model_data is not None
+        and
+        survey_data is not None
+    ):
 
-        # ----------------------------------------------------
-        # Calculate intervals
-        # ----------------------------------------------------
+        # ====================================================
+        # ORIGINAL DATA
+        # ====================================================
 
-        model_interval = calculate_interval_minutes(model_data)
-        survey_interval = calculate_interval_minutes(survey_data)
+        model_data_original = (
+            model_data.copy()
+        )
 
-        # ----------------------------------------------------
-        # Data overview
-        # ----------------------------------------------------
+        survey_data_original = (
+            survey_data.copy()
+        )
 
-        st.subheader("📋 Data Overview")
+        # ====================================================
+        # INTERVAL INFORMATION
+        # ====================================================
+
+        model_interval = (
+            calculate_interval_minutes(
+                model_data
+            )
+        )
+
+        survey_interval = (
+            calculate_interval_minutes(
+                survey_data
+            )
+        )
+
+        # ====================================================
+        # DATA OVERVIEW
+        # ====================================================
+
+        st.subheader(
+            "📋 Data Overview"
+        )
 
         col1, col2 = st.columns(2)
 
+        # ----------------------------------------------------
+        # MODEL
+        # ----------------------------------------------------
+
         with col1:
 
-            st.markdown("### 📊 Model Data")
-
-            st.write(
-                f"Records: **{len(model_data):,}**"
+            st.markdown(
+                "### 📊 Model Data"
             )
 
             st.write(
-                f"Time range: **"
-                f"{model_data['datetime'].min()}** → **"
-                f"{model_data['datetime'].max()}**"
+                f"Records: "
+                f"**{len(model_data):,}**"
+            )
+
+            st.write(
+                f"Start: "
+                f"**{model_data['datetime'].min()}**"
+            )
+
+            st.write(
+                f"End: "
+                f"**{model_data['datetime'].max()}**"
             )
 
             if model_interval:
 
                 st.write(
-                    f"Typical interval: **"
-                    f"{model_interval['median']:.2f} min**"
+                    f"Typical interval: "
+                    f"**{model_interval['median']:.2f} min**"
                 )
+
+                st.write(
+                    f"Minimum interval: "
+                    f"**{model_interval['minimum']:.2f} min**"
+                )
+
+                st.write(
+                    f"Maximum interval: "
+                    f"**{model_interval['maximum']:.2f} min**"
+                )
+
+        # ----------------------------------------------------
+        # SURVEY
+        # ----------------------------------------------------
 
         with col2:
 
-            st.markdown("### 📊 Survey Data")
-
-            st.write(
-                f"Records: **{len(survey_data):,}**"
+            st.markdown(
+                "### 📊 Survey Data"
             )
 
             st.write(
-                f"Time range: **"
-                f"{survey_data['datetime'].min()}** → **"
-                f"{survey_data['datetime'].max()}**"
+                f"Records: "
+                f"**{len(survey_data):,}**"
+            )
+
+            st.write(
+                f"Start: "
+                f"**{survey_data['datetime'].min()}**"
+            )
+
+            st.write(
+                f"End: "
+                f"**{survey_data['datetime'].max()}**"
             )
 
             if survey_interval:
 
                 st.write(
-                    f"Typical interval: **"
-                    f"{survey_interval['median']:.2f} min**"
+                    f"Typical interval: "
+                    f"**{survey_interval['median']:.2f} min**"
                 )
 
+                st.write(
+                    f"Minimum interval: "
+                    f"**{survey_interval['minimum']:.2f} min**"
+                )
+
+                st.write(
+                    f"Maximum interval: "
+                    f"**{survey_interval['maximum']:.2f} min**"
+                )
+
+        # ====================================================
+        # TIME RANGE CHECK
+        # ====================================================
+
+        st.subheader(
+            "⏱️ Time Coverage"
+        )
+
+        model_start = (
+            model_data["datetime"].min()
+        )
+
+        model_end = (
+            model_data["datetime"].max()
+        )
+
+        survey_start = (
+            survey_data["datetime"].min()
+        )
+
+        survey_end = (
+            survey_data["datetime"].max()
+        )
+
         # ----------------------------------------------------
-        # Display input data
+        # Determine whether there is any direct overlap
         # ----------------------------------------------------
+
+        overlap_start = max(
+            model_start,
+            survey_start
+        )
+
+        overlap_end = min(
+            model_end,
+            survey_end
+        )
+
+        if overlap_start <= overlap_end:
+
+            st.success(
+                "✅ Model and survey periods overlap."
+            )
+
+            st.write(
+                f"Common period: "
+                f"**{overlap_start}** → **{overlap_end}**"
+            )
+
+        else:
+
+            st.warning(
+                "⚠️ Model and survey periods do not "
+                "directly overlap. A valid overlap may "
+                "still be found after applying the "
+                "allowed time shift."
+            )
+
+        # ====================================================
+        # ZERO-MEAN CONVERSION
+        # ====================================================
+
+        if apply_zero_mean:
+
+            model_mean = (
+                model_data[
+                    "water_elevation"
+                ].mean()
+            )
+
+            survey_mean = (
+                survey_data[
+                    "water_elevation"
+                ].mean()
+            )
+
+            model_data[
+                "water_elevation"
+            ] = (
+                model_data[
+                    "water_elevation"
+                ]
+                -
+                model_mean
+            )
+
+            survey_data[
+                "water_elevation"
+            ] = (
+                survey_data[
+                    "water_elevation"
+                ]
+                -
+                survey_mean
+            )
+
+            st.info(
+                f"✓ Zero-mean conversion applied | "
+                f"Model mean: {model_mean:.6f} | "
+                f"Survey mean: {survey_mean:.6f}"
+            )
+
+        # ====================================================
+        # DATA PREVIEW
+        # ====================================================
 
         col1, col2 = st.columns(2)
 
         with col1:
 
-            st.subheader("📊 Model Data Preview")
+            st.subheader(
+                "📊 Model Data Preview"
+            )
+
+            if apply_zero_mean:
+
+                st.caption(
+                    "Showing zero-meaned values."
+                )
 
             st.dataframe(
                 model_data.head(20),
@@ -588,92 +1054,24 @@ if model_input and survey_input:
 
         with col2:
 
-            st.subheader("📊 Survey Data Preview")
+            st.subheader(
+                "📊 Survey Data Preview"
+            )
+
+            if apply_zero_mean:
+
+                st.caption(
+                    "Showing zero-meaned values."
+                )
 
             st.dataframe(
                 survey_data.head(20),
                 use_container_width=True
             )
 
-        # ----------------------------------------------------
-        # Check time ranges
-        # ----------------------------------------------------
-
-        st.subheader("⏱️ Time Coverage Check")
-
-        model_start = model_data["datetime"].min()
-        model_end = model_data["datetime"].max()
-
-        survey_start = survey_data["datetime"].min()
-        survey_end = survey_data["datetime"].max()
-
-        if (
-            survey_start >= model_start
-            and survey_end <= model_end
-        ):
-
-            st.success(
-                "✅ Survey period is fully contained within "
-                "the model period."
-            )
-
-        else:
-
-            st.warning(
-                "⚠️ Survey period is not completely contained "
-                "within the model period."
-            )
-
-            st.write(
-                f"Model: {model_start} → {model_end}"
-            )
-
-            st.write(
-                f"Survey: {survey_start} → {survey_end}"
-            )
-
-            st.info(
-                "The application will still test shifted periods, "
-                "but a shift is valid only when ALL survey timestamps "
-                "can be interpolated from the model."
-            )
-
-        # ----------------------------------------------------
-        # Zero mean
-        # ----------------------------------------------------
-
-        model_data_original = model_data.copy()
-        survey_data_original = survey_data.copy()
-
-        if apply_zero_mean:
-
-            model_mean = model_data[
-                "water_elevation"
-            ].mean()
-
-            survey_mean = survey_data[
-                "water_elevation"
-            ].mean()
-
-            model_data["water_elevation"] = (
-                model_data["water_elevation"]
-                - model_mean
-            )
-
-            survey_data["water_elevation"] = (
-                survey_data["water_elevation"]
-                - survey_mean
-            )
-
-            st.info(
-                f"✓ Zero-mean conversion applied | "
-                f"Model mean: {model_mean:.4f} | "
-                f"Survey mean: {survey_mean:.4f}"
-            )
-
-        # ----------------------------------------------------
-        # Run analysis
-        # ----------------------------------------------------
+        # ====================================================
+        # RUN ANALYSIS
+        # ====================================================
 
         if st.button(
             "🔍 Run Analysis",
@@ -687,7 +1085,10 @@ if model_input and survey_input:
                 (
                     best_rmse,
                     best_shift_minutes,
-                    best_model_values
+                    comparison_times,
+                    aligned_model_values,
+                    aligned_survey_values,
+                    best_model_datetimes
                 ) = find_best_shift(
                     model_data,
                     survey_data,
@@ -695,98 +1096,120 @@ if model_input and survey_input:
                     shift_step_minutes
                 )
 
-            # ------------------------------------------------
-            # Check whether analysis succeeded
-            # ------------------------------------------------
+            # =================================================
+            # CHECK RESULT
+            # =================================================
 
             if best_shift_minutes is None:
 
                 st.error(
-                    "❌ No valid time alignment was found.\n\n"
-                    "This means that within the specified maximum "
-                    "shift, at least one survey timestamp could not "
-                    "be matched/interpolated from the model data."
+                    "❌ No valid time alignment was found."
+                )
+
+                st.markdown(
+                    """
+                    This means that no candidate shift within
+                    the specified maximum shift produced a
+                    complete overlap between the reference
+                    dataset and the other dataset.
+
+                    Try one or more of the following:
+
+                    - Increase **Maximum Shift**
+                    - Check that the timestamps use the same
+                      date/time convention
+                    - Check that the model and survey periods
+                      actually correspond to each other
+                    - Reduce the **Shift Search Step** if a
+                      finer alignment is required
+                    """
                 )
 
             else:
 
-                # ============================================
-                # CREATE ALIGNED OUTPUT
-                # ============================================
-
-                survey_times = survey_data["datetime"]
-
-                shifted_model_times = (
-                    model_data["datetime"]
-                    +
-                    pd.to_timedelta(
-                        best_shift_minutes,
-                        unit="min"
-                    )
-                )
-
-                # ------------------------------------------------
-                # Create output
-                # ------------------------------------------------
+                # =============================================
+                # CREATE OUTPUT DATAFRAME
+                # =============================================
 
                 output_df = pd.DataFrame()
 
-                output_df["datetime"] = survey_times
-
-                output_df["survey_data"] = (
-                    survey_data[
-                        "water_elevation"
-                    ].values
+                output_df[
+                    "datetime"
+                ] = (
+                    comparison_times
                 )
 
-                output_df["model_datetime"] = (
-                    survey_times
-                    -
-                    pd.to_timedelta(
-                        best_shift_minutes,
-                        unit="min"
-                    )
+                output_df[
+                    "model_datetime"
+                ] = (
+                    best_model_datetimes
                 )
 
-                output_df["model_data"] = (
-                    best_model_values
+                output_df[
+                    "model_data"
+                ] = (
+                    aligned_model_values
                 )
 
-                # ------------------------------------------------
-                # Add original scale values
-                # ------------------------------------------------
+                output_df[
+                    "survey_data"
+                ] = (
+                    aligned_survey_values
+                )
+
+                # =============================================
+                # ORIGINAL SCALE
+                # =============================================
 
                 if apply_zero_mean:
 
-                    output_df["survey_data_original"] = (
-                        output_df["survey_data"]
-                        + survey_mean
+                    output_df[
+                        "model_data_original"
+                    ] = (
+                        output_df[
+                            "model_data"
+                        ]
+                        +
+                        model_mean
                     )
 
-                    output_df["model_data_original"] = (
-                        output_df["model_data"]
-                        + model_mean
+                    output_df[
+                        "survey_data_original"
+                    ] = (
+                        output_df[
+                            "survey_data"
+                        ]
+                        +
+                        survey_mean
                     )
 
-                # ============================================
+                # =============================================
                 # FINAL RMSE
-                # ============================================
+                # =============================================
 
                 final_rmse = sqrt(
                     mean_squared_error(
-                        output_df["model_data"],
-                        output_df["survey_data"]
+                        output_df[
+                            "model_data"
+                        ],
+                        output_df[
+                            "survey_data"
+                        ]
                     )
                 )
 
-                # ------------------------------------------------
+                # =============================================
                 # RMSE %
-                # ------------------------------------------------
+                # =============================================
 
                 model_range = (
-                    model_data["water_elevation"].max()
+                    model_data[
+                        "water_elevation"
+                    ].max()
                     -
-                    model_data["water_elevation"].min()
+                    model_data[
+                        "water_elevation"
+                    ].min()
                 )
 
                 if model_range != 0:
@@ -801,15 +1224,17 @@ if model_input and survey_input:
 
                     rmse_percent = np.nan
 
-                # ============================================
+                # =============================================
                 # RESULTS
-                # ============================================
+                # =============================================
 
                 st.success(
                     "✅ Analysis Complete!"
                 )
 
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4 = (
+                    st.columns(4)
+                )
 
                 with col1:
 
@@ -842,56 +1267,75 @@ if model_input and survey_input:
                 if apply_zero_mean:
 
                     st.caption(
-                        "*RMSE calculated using zero-meaned data.*"
+                        "*RMSE calculated on zero-meaned data.*"
                     )
 
-                # ============================================
+                # =============================================
                 # MATCHING INFORMATION
-                # ============================================
+                # =============================================
 
                 st.subheader(
-                    "🔗 Survey ↔ Model Time Matching"
+                    "🔗 Time Matching Information"
                 )
 
-                st.markdown(
-                    f"""
-                    The survey data contains **{len(survey_data):,}**
-                    records.
-
-                    For every survey timestamp, the application
-                    interpolated the corresponding model value.
-
-                    **Constraint:** all survey records must have a
-                    valid model match. No extrapolation is permitted.
-                    """
+                st.write(
+                    f"Comparison points: "
+                    f"**{len(output_df):,}**"
                 )
 
-                # ------------------------------------------------
-                # Show matched data
-                # ------------------------------------------------
+                st.write(
+                    f"Best time shift: "
+                    f"**{best_shift_minutes:+d} minutes**"
+                )
+
+                if model_interval["median"] > survey_interval["median"]:
+
+                    st.info(
+                        "Model has the coarser sampling interval. "
+                        "Survey values were interpolated onto "
+                        "the model timestamps."
+                    )
+
+                else:
+
+                    st.info(
+                        "Survey has the coarser sampling interval. "
+                        "Model values were interpolated onto "
+                        "the survey timestamps."
+                    )
+
+                # =============================================
+                # MATCHED DATA TABLE
+                # =============================================
+
+                st.subheader(
+                    "📋 Matched / Interpolated Data"
+                )
 
                 display_columns = [
                     "datetime",
                     "model_datetime",
-                    "survey_data",
-                    "model_data"
+                    "model_data",
+                    "survey_data"
                 ]
 
                 if apply_zero_mean:
 
                     display_columns += [
-                        "survey_data_original",
-                        "model_data_original"
+                        "model_data_original",
+                        "survey_data_original"
                     ]
 
                 st.dataframe(
-                    output_df[display_columns].head(50),
+                    output_df[
+                        display_columns
+                    ].head(100),
                     use_container_width=True
                 )
 
-                # ============================================
+                # =============================================
                 # PLOT
-                # ============================================
+                # =============================================
 
                 st.subheader(
                     "📈 Water Elevation Comparison"
@@ -943,7 +1387,7 @@ if model_input and survey_input:
 
                 ax.set_title(
                     "Comparison between Survey Data "
-                    "and Interpolated Model Data",
+                    "and Model Data",
                     fontsize=14,
                     fontweight="bold",
                     pad=20
@@ -980,9 +1424,9 @@ if model_input and survey_input:
 
                 st.pyplot(fig)
 
-                # ============================================
-                # STATISTICS
-                # ============================================
+                # =============================================
+                # STATISTICAL SUMMARY
+                # =============================================
 
                 st.subheader(
                     "📊 Statistical Summary"
@@ -997,27 +1441,26 @@ if model_input and survey_input:
                     )
 
                     st.write(
-                        survey_data[
-                            "water_elevation"
+                        output_df[
+                            "survey_data"
                         ].describe()
                     )
 
                 with col2:
 
                     st.write(
-                        "**Aligned / Interpolated "
-                        "Model Data Statistics:**"
+                        "**Aligned Model Data Statistics:**"
                     )
 
                     st.write(
-                        pd.Series(
-                            output_df["model_data"]
-                        ).describe()
+                        output_df[
+                            "model_data"
+                        ].describe()
                     )
 
-                # ============================================
+                # =============================================
                 # DOWNLOAD
-                # ============================================
+                # =============================================
 
                 st.subheader(
                     "💾 Download Results"
@@ -1028,7 +1471,9 @@ if model_input and survey_input:
                 )
 
                 st.download_button(
-                    label="📥 Download Aligned Data (CSV)",
+                    label=(
+                        "📥 Download Aligned Data (CSV)"
+                    ),
                     data=csv,
                     file_name=(
                         f"aligned_output_"
@@ -1037,6 +1482,10 @@ if model_input and survey_input:
                     mime="text/csv"
                 )
 
+
+# ============================================================
+# NO INPUT
+# ============================================================
 
 else:
 
@@ -1062,11 +1511,8 @@ else:
         2/12/1900 00:02    -0.346125
         2/12/1900 00:04    -0.347500
         2/12/1900 00:06    -0.350125
-        ...
+        2/12/1900 00:08    -0.351250
         ```
-
-        The model can have a different sampling interval from
-        the survey data.
 
         ---
 
@@ -1087,13 +1533,13 @@ else:
 
         #### 3. Different Sampling Intervals
 
-        The application supports different sampling intervals.
+        Model and survey do NOT need to have the same
+        sampling interval.
 
-        For example:
-
-        **Model:**
+        Example:
 
         ```
+        Model:
         00:00
         00:02
         00:04
@@ -1105,7 +1551,7 @@ else:
         00:16
         ```
 
-        **Survey:**
+        Survey:
 
         ```
         00:00
@@ -1115,66 +1561,23 @@ else:
         01:00
         ```
 
-        The model value at 00:15 does not need to exist
-        explicitly.
-
-        Instead, the application performs **linear interpolation**
-        between the surrounding model values.
+        The application will interpolate the model value
+        at the survey timestamps.
 
         ---
 
         #### 4. Time Alignment
 
-        The application searches for the best model/survey
-        alignment within the specified maximum shift.
+        The application searches for the best time shift.
 
-        For example:
-
-        ```
-        Model shifted +2 min
-        Model shifted +4 min
-        Model shifted +6 min
-        ...
-        Model shifted -2 min
-        Model shifted -4 min
-        ...
-        ```
-
-        The shift producing the lowest RMSE is selected.
-
-        ---
-
-        #### 5. Important Matching Constraint
-
-        **Every survey record must have a corresponding model
-        value.**
-
-        The application does NOT extrapolate model values.
-
-        Therefore, a candidate time shift is rejected if even
-        one survey timestamp falls outside the model time range.
-
-        ---
-
-        #### 6. Zero-Mean Conversion
-
-        Enable **Apply zero-mean conversion** when the model and
-        survey use different vertical datums.
-
-        Each dataset has its own mean removed before calculating
-        RMSE.
-
-        ---
-
-        #### 7. Shift Search Step
-
-        For a model with a 2-minute interval, use:
+        For example, with:
 
         ```
-        Shift Search Step = 2 minutes
+        Maximum Shift = 24 hours
+        Shift Step = 2 minutes
         ```
 
-        This means the application tests:
+        the application tests:
 
         ```
         -24:00
@@ -1190,23 +1593,79 @@ else:
         +24:00
         ```
 
-        You can use a smaller step if required, but the number
-        of calculations will increase.
+        The shift with the lowest RMSE is selected.
 
         ---
 
-        ### 💡 Recommended Setup for Your Case
+        #### 5. Dataset Length
 
-        **Model:** 2-minute data
+        **There is NO requirement that model data contains
+        more records than survey data.**
 
-        **Survey:** 15-minute data
+        The application determines the comparison timeline
+        from the sampling interval.
 
-        **Maximum Shift:** 24 hours
+        The dataset with the coarser interval becomes the
+        reference timeline.
 
-        **Shift Search Step:** 2 minutes
+        ---
 
-        The application will then use the 15-minute survey
-        timestamps as the comparison points and interpolate the
-        2-minute model data to those exact times.
+        #### 6. No Extrapolation
+
+        The application will never extrapolate beyond the
+        available source data.
+
+        Therefore, a candidate shift is accepted only when
+        every reference timestamp can be interpolated from
+        the other dataset.
+
+        ---
+
+        #### 7. Zero-Mean Conversion
+
+        Enable:
+
+        ```
+        Apply zero-mean conversion
+        ```
+
+        when the model and survey use different vertical
+        datums.
+
+        Each dataset has its own mean removed before RMSE
+        calculation.
+
+        ---
+
+        #### 8. Recommended Setup for 2-Minute Model /
+        15-Minute Survey
+
+        ```
+        Maximum Shift:
+        24 hours
+
+        Shift Search Step:
+        2 minutes
+        ```
+
+        The 15-minute survey timestamps will be used as
+        the comparison points and the 2-minute model will
+        be interpolated to those timestamps.
+
+        ---
+
+        ### 💡 Important
+
+        Both datasets must use the same time reference,
+        date convention, and timezone/time basis.
+
+        The date itself can be something like:
+
+        ```
+        2/12/1900
+        ```
+
+        as long as the same date/time basis is used for
+        both datasets.
         """
     )
